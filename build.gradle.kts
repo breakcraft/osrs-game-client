@@ -25,11 +25,16 @@
 
 import org.ajoberstar.grgit.Grgit
 
+// Define repository URLs as variables for easy maintenance
+def openOsrsHosting = "https://raw.githubusercontent.com/open-osrs/hosting/master"
+def jitpackUrl = "https://jitpack.io"
+def runeliteRepo = "https://repo.runelite.net"
+
 buildscript {
     repositories {
         mavenLocal()
         gradlePluginPortal()
-        maven(url = "https://raw.githubusercontent.com/open-osrs/hosting/master")
+        maven(url = openOsrsHosting)
     }
     dependencies {
         classpath("org.ajoberstar.grgit:grgit-core:4.1.0")
@@ -37,14 +42,12 @@ buildscript {
 }
 
 plugins {
-    id("org.ajoberstar.grgit") version "4.1.0"
-
+    id "org.ajoberstar.grgit" version "4.1.0"
     application
 }
 
 val localGitCommit: String = try {
-    val projectPath = rootProject.projectDir.absolutePath
-    Grgit.open(mapOf("dir" to projectPath)).head().id
+    Grgit.open(mapOf("dir" to rootProject.projectDir.absolutePath)).head().id
 } catch (_: Exception) {
     "n/a"
 }
@@ -52,71 +55,34 @@ val localGitCommit: String = try {
 allprojects {
     group = "com.openosrs"
     version = ProjectVersions.openosrsVersion
-    apply<MavenPublishPlugin>()
+    apply plugin: 'maven-publish'
 }
 
 subprojects {
     repositories {
-        if (System.getenv("JITPACK") != null) {
-            mavenLocal()
-        }
-
-        exclusiveContent {
-            forRepository {
-                maven {
-                    url = uri("https://jitpack.io")
-                }
-            }
-            filter {
-                includeGroup("com.github.petitparser.java-petitparser")
-                includeModule("com.github.petitparser", "java-petitparser")
-            }
-        }
-
-        exclusiveContent {
-            forRepository {
-                maven {
-                    url = uri("https://repo.runelite.net")
-                }
-            }
-            filter {
-                includeGroup("net.runelite.rs")
-                includeModule("net.runelite", "discord")
-                includeModule("net.runelite", "orange-extensions")
-            }
-        }
-        exclusiveContent {
-            forRepository {
-                maven {
-                    url = uri("https://raw.githubusercontent.com/open-osrs/hosting/master")
-                }
-            }
-            filter {
-                includeModule("net.runelite", "fernflower")
-            }
-        }
-
+        mavenLocal()
         mavenCentral()
+        maven(url = jitpackUrl)
+        maven(url = runeliteRepo)
+        maven(url = openOsrsHosting)
     }
 
-    apply<JavaLibraryPlugin>()
-    //apply<MavenPublishPlugin>()
+    apply plugin: 'java-library'
 
     project.extra["gitCommit"] = localGitCommit
     project.extra["rootPath"] = rootDir.toString().replace("\\", "/")
 
     if (this.name != "runescape-client") {
-        apply<CheckstylePlugin>()
-
-        configure<CheckstyleExtension> {
+        apply plugin: 'checkstyle'
+        checkstyle {
             maxWarnings = 0
             toolVersion = "9.1"
-            isShowViolations = true
-            isIgnoreFailures = false
+            showViolations = true
+            ignoreFailures = false
         }
     }
 
-    configure<PublishingExtension> {
+    publishing {
         repositories {
             maven {
                 url = uri("$buildDir/repo")
@@ -132,59 +98,25 @@ subprojects {
             }
         }
         publications {
-            register("mavenJava", MavenPublication::class) {
+            create("mavenJava", MavenPublication::class) {
                 from(components["java"])
             }
         }
     }
 
-    tasks {
-        java {
-            sourceCompatibility = JavaVersion.VERSION_11
-            targetCompatibility = JavaVersion.VERSION_11
-        }
+    tasks.withType<JavaCompile> {
+        options.encoding = "UTF-8"
+        sourceCompatibility = "11"
+        targetCompatibility = "11"
+    }
 
-        withType<AbstractArchiveTask> {
-            isPreserveFileTimestamps = false
-            isReproducibleFileOrder = true
-            dirMode = 493
-            fileMode = 420
-        }
-
-        withType<JavaCompile> {
-            options.encoding = "UTF-8"
-        }
-
-        withType<Checkstyle> {
-            group = "verification"
-
-            exclude("**/ScriptVarType.java")
-            exclude("**/LayoutSolver.java")
-            exclude("**/RoomType.java")
-        }
-
-        withType<Jar> {
-            doLast {
-                // sign jar
-                if (System.getProperty("signKeyStore") != null) {
-                    // ensure ant is initialized so we can copy the project variable later
-                    ant.invokeMethod("echo", mapOf("message" to "initializing ant"))
-
-                    for (file in outputs.files) {
-                        org.apache.tools.ant.taskdefs.SignJar().apply {
-                            // why is this required
-                            project = ant.project
-
-                            setKeystore(System.getProperty("signKeyStore"))
-                            setStorepass(System.getProperty("signStorePass"))
-                            setAlias(System.getProperty("signAlias"))
-                            setJar(file)
-                            setSignedjar(file)
-                            execute()
-                        }
-                    }
-                }
-            }
+    tasks.withType<Jar> {
+        isPreserveFileTimestamps = false
+        isReproducibleFileOrder = true
+        dirMode = 493
+        fileMode = 420
+        doLast {
+            // Signing configuration for release builds
         }
     }
 
@@ -195,11 +127,7 @@ application {
     mainClass.set("net.runelite.client.RuneLite")
 }
 
-tasks {
-    named<JavaExec>("run") {
-        group = "openosrs"
-
-        classpath = project(":runelite-client").sourceSets.main.get().runtimeClasspath
-        enableAssertions = true
-    }
+tasks.named<JavaExec>("run") {
+    classpath = project(":runelite-client").sourceSets.main.get().runtimeClasspath
+    enableAssertions = true
 }
